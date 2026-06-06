@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 
+const APP_USERNAME = "admin";
+const APP_PASSWORD = "123456789";
+
 function pad3(value) {
   return String(value ?? "").padStart(3, "0").slice(-3);
 }
@@ -25,7 +28,6 @@ function top5ByPosition(rowsAsc, position) {
 
     score[d] += 4;
     score[d] += (i / rowsAsc.length) * 3;
-
     if (d <= 3 || d >= 7) score[d] += 2;
     if (prev[position] === curr[position]) score[d] += 1;
   }
@@ -41,14 +43,41 @@ function predictSet(fromDigit, deltas) {
 }
 
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(
+    localStorage.getItem("lottery_dashboard_login") === "yes"
+  );
+  const [loginUser, setLoginUser] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginError, setLoginError] = useState("");
+
   const [draws, setDraws] = useState([]);
   const [latestInput, setLatestInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState("");
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (isLoggedIn) loadData();
+  }, [isLoggedIn]);
+
+  function handleLogin(e) {
+    e.preventDefault();
+
+    if (loginUser === APP_USERNAME && loginPass === APP_PASSWORD) {
+      localStorage.setItem("lottery_dashboard_login", "yes");
+      setIsLoggedIn(true);
+      setLoginError("");
+      return;
+    }
+
+    setLoginError("Username หรือ Password ไม่ถูกต้อง");
+  }
+
+  function logout() {
+    localStorage.removeItem("lottery_dashboard_login");
+    setIsLoggedIn(false);
+    setLoginUser("");
+    setLoginPass("");
+  }
 
   async function loadData() {
     setLoading(true);
@@ -58,9 +87,6 @@ export default function App() {
       .from("lottery_draws")
       .select("id, draw_date, year_th, first_prize, top3")
       .order("draw_date", { ascending: true });
-
-    console.log("lottery_draws data:", data);
-    console.log("lottery_draws error:", error);
 
     if (error) {
       setErrorText(error.message || "ไม่สามารถโหลดข้อมูลจาก Supabase ได้");
@@ -97,7 +123,6 @@ export default function App() {
     }
 
     const trainRows = draws.slice(-48);
-
     const hDelta = top5ByPosition(trainRows, 0);
     const tDelta = top5ByPosition(trainRows, 1);
     const uDelta = top5ByPosition(trainRows, 2);
@@ -109,7 +134,6 @@ export default function App() {
     const nextU = predictSet(latest[2], uDelta);
 
     const displayRows = draws.slice(-24);
-
     const rows = [];
     let hitCount = 0;
     let totalCount = 0;
@@ -132,7 +156,6 @@ export default function App() {
       const uOk = predU.includes(Number(to[2]));
 
       const oks = [hOk, tOk, uOk];
-
       oks.forEach((ok, idx) => {
         totalCount++;
         posTotal[idx]++;
@@ -168,9 +191,46 @@ export default function App() {
     };
   }, [draws, latestInput]);
 
+  if (!isLoggedIn) {
+    return (
+      <div style={styles.loginPage}>
+        <form onSubmit={handleLogin} style={styles.loginBox}>
+          <h1 style={styles.loginTitle}>Lottery Delta Dashboard</h1>
+          <div style={styles.loginSub}>Private Access</div>
+
+          <label style={styles.label}>Username</label>
+          <input
+            value={loginUser}
+            onChange={(e) => setLoginUser(e.target.value)}
+            style={styles.loginInput}
+            placeholder="Username"
+          />
+
+          <label style={styles.label}>Password</label>
+          <input
+            value={loginPass}
+            onChange={(e) => setLoginPass(e.target.value)}
+            style={styles.loginInput}
+            type="password"
+            placeholder="Password"
+          />
+
+          {loginError && <div style={styles.loginError}>{loginError}</div>}
+
+          <button type="submit" style={styles.loginButton}>Login</button>
+
+          <div style={styles.loginHint}>Default: admin / 123456789</div>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.page}>
-      <h1 style={styles.title}>Adaptive Hybrid Delta Dashboard v7</h1>
+      <div style={styles.headerRow}>
+        <h1 style={styles.title}>Adaptive Hybrid Delta Dashboard v7</h1>
+        <button onClick={logout} style={styles.logoutButton}>Logout</button>
+      </div>
 
       {loading && <div style={styles.notice}>Loading data from Supabase...</div>}
 
@@ -293,8 +353,19 @@ function Card({ title, value, sub }) {
 }
 
 const styles = {
+  loginPage: { minHeight: "100vh", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontFamily: "Arial, Tahoma, sans-serif", padding: "24px" },
+  loginBox: { width: "100%", maxWidth: "420px", background: "#111827", border: "1px solid #374151", borderRadius: "18px", padding: "28px", boxShadow: "0 20px 60px rgba(0,0,0,.35)" },
+  loginTitle: { color: "#fbbf24", margin: "0 0 4px", fontSize: "30px" },
+  loginSub: { color: "#cbd5e1", marginBottom: "20px" },
+  label: { display: "block", color: "#fbbf24", fontWeight: "bold", margin: "12px 0 6px" },
+  loginInput: { width: "100%", padding: "12px", borderRadius: "10px", border: "1px solid #334155", background: "#020617", color: "white", fontSize: "16px" },
+  loginButton: { width: "100%", marginTop: "18px", background: "#f59e0b", color: "black", border: "none", borderRadius: "10px", padding: "12px", fontWeight: "bold", cursor: "pointer", fontSize: "16px" },
+  loginError: { background: "#3f1d1d", border: "1px solid #ef4444", color: "#fecaca", borderRadius: "8px", padding: "10px", marginTop: "12px" },
+  loginHint: { color: "#94a3b8", fontSize: "12px", marginTop: "14px", textAlign: "center" },
   page: { padding: "24px", fontFamily: "Arial, Tahoma, sans-serif", background: "#0f172a", minHeight: "100vh", color: "white" },
+  headerRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" },
   title: { color: "#fbbf24", fontSize: "36px", margin: "0 0 18px" },
+  logoutButton: { background: "#334155", color: "white", border: "1px solid #64748b", borderRadius: "8px", padding: "9px 14px", cursor: "pointer", fontWeight: "bold" },
   notice: { background: "#1e293b", border: "1px solid #334155", padding: "12px", borderRadius: "10px", marginBottom: "16px" },
   errorBox: { background: "#3f1d1d", color: "#fecaca", border: "1px solid #ef4444", padding: "14px", borderRadius: "10px", marginBottom: "16px" },
   grid4: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginBottom: "16px" },
