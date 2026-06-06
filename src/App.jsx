@@ -43,10 +43,10 @@ function scoreByPosition(rowsAsc, position) {
 
     if (!score[d]) score[d] = 0;
 
-    score[d] += 4;
-    score[d] += (i / maxIndex) * 3;
-    if (d <= 3 || d >= 7) score[d] += 2;
-    if (prev[position] === curr[position]) score[d] += 1;
+    score[d] += 4; // Frequency
+    score[d] += (i / maxIndex) * 3; // Recency
+    if (d <= 3 || d >= 7) score[d] += 2; // Momentum
+    if (prev[position] === curr[position]) score[d] += 1; // Transition
   }
 
   return Object.entries(score)
@@ -69,6 +69,7 @@ function confidenceFromScores(scored, n = 2) {
 
 function buildCombinations(h, t, u) {
   const result = [];
+
   h.forEach((a) => {
     t.forEach((b) => {
       u.forEach((c) => {
@@ -76,7 +77,8 @@ function buildCombinations(h, t, u) {
       });
     });
   });
-  return result;
+
+  return result.sort((x, y) => Number(x) - Number(y));
 }
 
 export default function App() {
@@ -303,7 +305,6 @@ export default function App() {
           {loginError && <div style={styles.loginError}>{loginError}</div>}
 
           <button type="submit" style={styles.loginButton}>Login</button>
-
           <div style={styles.loginHint}>Default: admin / 123456789</div>
         </form>
       </div>
