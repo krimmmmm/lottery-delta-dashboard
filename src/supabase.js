@@ -4,7 +4,7 @@ const supabaseUrl =
   "https://pvmsfzlwepoldjgolavp.supabase.co";
 
 const supabaseKey =
-  "PASTE_YOUR_ANON_PUBLIC_KEY";
+  "sb_publishable_grq7lWV9pgtLoyzR3TzorA_zk30TBAd";
 
 export const supabase = createClient(
   supabaseUrl,
