@@ -16,8 +16,9 @@ function delta(a, b) {
   return mod10(Number(b) - Number(a));
 }
 
-function top5ByPosition(rowsAsc, position) {
+function scoreByPosition(rowsAsc, position) {
   const score = {};
+  const maxIndex = Math.max(rowsAsc.length - 1, 1);
 
   for (let i = 1; i < rowsAsc.length; i++) {
     const prev = pad3(rowsAsc[i - 1].top3);
@@ -26,20 +27,48 @@ function top5ByPosition(rowsAsc, position) {
 
     if (!score[d]) score[d] = 0;
 
-    score[d] += 4;
-    score[d] += (i / rowsAsc.length) * 3;
-    if (d <= 3 || d >= 7) score[d] += 2;
-    if (prev[position] === curr[position]) score[d] += 1;
+    const frequency = 4;
+    const recency = (i / maxIndex) * 3;
+    const momentum = d <= 3 || d >= 7 ? 2 : 0;
+    const transition = prev[position] === curr[position] ? 1 : 0;
+
+    score[d] += frequency + recency + momentum + transition;
   }
 
   return Object.entries(score)
-    .sort((a, b) => b[1] - a[1] || Number(a[0]) - Number(b[0]))
-    .slice(0, 5)
-    .map(([d]) => Number(d));
+    .map(([d, s]) => ({
+      delta: Number(d),
+      score: Number(s),
+    }))
+    .sort((a, b) => b.score - a.score || a.delta - b.delta);
+}
+
+function topNDeltas(rowsAsc, position, n) {
+  return scoreByPosition(rowsAsc, position)
+    .slice(0, n)
+    .map((x) => x.delta);
 }
 
 function predictSet(fromDigit, deltas) {
   return deltas.map((d) => mod10(Number(fromDigit) + d));
+}
+
+function confidenceFromScores(scored, n = 2) {
+  const total = scored.reduce((sum, item) => sum + item.score, 0);
+  const top = scored.slice(0, n).reduce((sum, item) => sum + item.score, 0);
+  return total ? Math.round((top / total) * 100) : 0;
+}
+
+function buildCombinations(h, t, u) {
+  const result = [];
+  h.forEach((a) => {
+    t.forEach((b) => {
+      u.forEach((c) => {
+        result.push(`${a}${b}${c}`);
+      });
+    });
+  });
+  return result;
 }
 
 export default function App() {
@@ -114,6 +143,11 @@ export default function App() {
         nextH: [],
         nextT: [],
         nextU: [],
+        coreH: [],
+        coreT: [],
+        coreU: [],
+        core8: [],
+        confidence: [0, 0, 0],
         backtest: [],
         hitRate: 0,
         hitCount: 0,
@@ -123,15 +157,30 @@ export default function App() {
     }
 
     const trainRows = draws.slice(-48);
-    const hDelta = top5ByPosition(trainRows, 0);
-    const tDelta = top5ByPosition(trainRows, 1);
-    const uDelta = top5ByPosition(trainRows, 2);
+
+    const hScores = scoreByPosition(trainRows, 0);
+    const tScores = scoreByPosition(trainRows, 1);
+    const uScores = scoreByPosition(trainRows, 2);
+
+    const hDelta5 = hScores.slice(0, 5).map((x) => x.delta);
+    const tDelta5 = tScores.slice(0, 5).map((x) => x.delta);
+    const uDelta5 = uScores.slice(0, 5).map((x) => x.delta);
+
+    const hDelta2 = hScores.slice(0, 2).map((x) => x.delta);
+    const tDelta2 = tScores.slice(0, 2).map((x) => x.delta);
+    const uDelta2 = uScores.slice(0, 2).map((x) => x.delta);
 
     const latest = pad3(latestInput || trainRows[trainRows.length - 1].top3);
 
-    const nextH = predictSet(latest[0], hDelta);
-    const nextT = predictSet(latest[1], tDelta);
-    const nextU = predictSet(latest[2], uDelta);
+    const nextH = predictSet(latest[0], hDelta5);
+    const nextT = predictSet(latest[1], tDelta5);
+    const nextU = predictSet(latest[2], uDelta5);
+
+    const coreH = predictSet(latest[0], hDelta2);
+    const coreT = predictSet(latest[1], tDelta2);
+    const coreU = predictSet(latest[2], uDelta2);
+
+    const core8 = buildCombinations(coreH, coreT, coreU);
 
     const displayRows = draws.slice(-24);
     const rows = [];
@@ -147,15 +196,24 @@ export default function App() {
       const from = pad3(prev.top3);
       const to = pad3(curr.top3);
 
-      const predH = predictSet(from[0], hDelta);
-      const predT = predictSet(from[1], tDelta);
-      const predU = predictSet(from[2], uDelta);
+      const predH = predictSet(from[0], hDelta5);
+      const predT = predictSet(from[1], tDelta5);
+      const predU = predictSet(from[2], uDelta5);
+
+      const corePredH = predictSet(from[0], hDelta2);
+      const corePredT = predictSet(from[1], tDelta2);
+      const corePredU = predictSet(from[2], uDelta2);
 
       const hOk = predH.includes(Number(to[0]));
       const tOk = predT.includes(Number(to[1]));
       const uOk = predU.includes(Number(to[2]));
 
+      const hCoreOk = corePredH.includes(Number(to[0]));
+      const tCoreOk = corePredT.includes(Number(to[1]));
+      const uCoreOk = corePredU.includes(Number(to[2]));
+
       const oks = [hOk, tOk, uOk];
+
       oks.forEach((ok, idx) => {
         totalCount++;
         posTotal[idx]++;
@@ -172,10 +230,17 @@ export default function App() {
         predH,
         predT,
         predU,
+        corePredH,
+        corePredT,
+        corePredU,
         hOk,
         tOk,
         uOk,
+        hCoreOk,
+        tCoreOk,
+        uCoreOk,
         score: oks.filter(Boolean).length,
+        coreScore: [hCoreOk, tCoreOk, uCoreOk].filter(Boolean).length,
       });
     }
 
@@ -183,6 +248,15 @@ export default function App() {
       nextH,
       nextT,
       nextU,
+      coreH,
+      coreT,
+      coreU,
+      core8,
+      confidence: [
+        confidenceFromScores(hScores, 2),
+        confidenceFromScores(tScores, 2),
+        confidenceFromScores(uScores, 2),
+      ],
       backtest: rows,
       hitRate: totalCount ? Math.round((hitCount / totalCount) * 100) : 0,
       hitCount,
@@ -228,7 +302,7 @@ export default function App() {
   return (
     <div style={styles.page}>
       <div style={styles.headerRow}>
-        <h1 style={styles.title}>Adaptive Hybrid Delta Dashboard v7</h1>
+        <h1 style={styles.title}>Adaptive Hybrid Delta Dashboard v8</h1>
         <button onClick={logout} style={styles.logoutButton}>Logout</button>
       </div>
 
@@ -266,13 +340,27 @@ export default function App() {
           <div style={styles.subText}>ใช้เป็นฐาน From เพื่อวิเคราะห์ช่วงถัดไป</div>
         </div>
 
-        <Card title="หลักร้อย งวดถัดไป" value={analysis.nextH.join(",") || "-"} />
-        <Card title="หลักสิบ งวดถัดไป" value={analysis.nextT.join(",") || "-"} />
-        <Card title="หลักหน่วย งวดถัดไป" value={analysis.nextU.join(",") || "-"} />
+        <Card title="หลักร้อย Top-5" value={analysis.nextH.join(",") || "-"} />
+        <Card title="หลักสิบ Top-5" value={analysis.nextT.join(",") || "-"} />
+        <Card title="หลักหน่วย Top-5" value={analysis.nextU.join(",") || "-"} />
+      </div>
+
+      <h2 style={styles.sectionTitle}>High Confidence Top-2 Core Signal</h2>
+      <div style={styles.grid4}>
+        <Card title="หลักร้อย เด่น 2 ตัว" value={analysis.coreH.join(",") || "-"} sub={`Confidence ${analysis.confidence[0]}%`} />
+        <Card title="หลักสิบ เด่น 2 ตัว" value={analysis.coreT.join(",") || "-"} sub={`Confidence ${analysis.confidence[1]}%`} />
+        <Card title="หลักหน่วย เด่น 2 ตัว" value={analysis.coreU.join(",") || "-"} sub={`Confidence ${analysis.confidence[2]}%`} />
+        <Card title="Core 8 Sets" value="8 ชุด" sub="Top-2 × Top-2 × Top-2" />
+      </div>
+
+      <div style={styles.coreBox}>
+        {analysis.core8.map((n) => (
+          <span key={n} style={styles.coreChip}>{n}</span>
+        ))}
       </div>
 
       <div style={styles.grid4}>
-        <Card title="Hit Rate" value={`${analysis.hitRate}%`} sub={`${analysis.hitCount}/${analysis.totalCount} หลัก`} />
+        <Card title="Hit Rate Top-5" value={`${analysis.hitRate}%`} sub={`${analysis.hitCount}/${analysis.totalCount} หลัก`} />
         <Card title="หลักร้อย Accuracy" value={`${analysis.acc[0]}%`} />
         <Card title="หลักสิบ Accuracy" value={`${analysis.acc[1]}%`} />
         <Card title="หลักหน่วย Accuracy" value={`${analysis.acc[2]}%`} />
@@ -287,13 +375,17 @@ export default function App() {
               <th style={styles.th}>งวดวันที่</th>
               <th style={styles.th}>Transition</th>
               <th style={styles.th}>เลขจริง</th>
-              <th style={styles.th}>Pred H</th>
+              <th style={styles.th}>Pred H Top-5</th>
               <th style={styles.th}>Hit H</th>
-              <th style={styles.th}>Pred T</th>
+              <th style={styles.th}>Core H Top-2</th>
+              <th style={styles.th}>Pred T Top-5</th>
               <th style={styles.th}>Hit T</th>
-              <th style={styles.th}>Pred U</th>
+              <th style={styles.th}>Core T Top-2</th>
+              <th style={styles.th}>Pred U Top-5</th>
               <th style={styles.th}>Hit U</th>
-              <th style={styles.th}>Result</th>
+              <th style={styles.th}>Core U Top-2</th>
+              <th style={styles.th}>Top-5 Result</th>
+              <th style={styles.th}>Core Result</th>
             </tr>
           </thead>
           <tbody>
@@ -304,11 +396,15 @@ export default function App() {
                 <td style={styles.td}>{r.actual}</td>
                 <td style={styles.pred}>{r.predH.join(",")}</td>
                 <td style={r.hOk ? styles.hit : styles.miss}>{r.hOk ? "เข้า" : "ไม่เข้า"}</td>
+                <td style={r.hCoreOk ? styles.coreHit : styles.coreMiss}>{r.corePredH.join(",")}</td>
                 <td style={styles.pred}>{r.predT.join(",")}</td>
                 <td style={r.tOk ? styles.hit : styles.miss}>{r.tOk ? "เข้า" : "ไม่เข้า"}</td>
+                <td style={r.tCoreOk ? styles.coreHit : styles.coreMiss}>{r.corePredT.join(",")}</td>
                 <td style={styles.pred}>{r.predU.join(",")}</td>
                 <td style={r.uOk ? styles.hit : styles.miss}>{r.uOk ? "เข้า" : "ไม่เข้า"}</td>
+                <td style={r.uCoreOk ? styles.coreHit : styles.coreMiss}>{r.corePredU.join(",")}</td>
                 <td style={styles.td}><b>{r.score}/3</b></td>
+                <td style={styles.td}><b>{r.coreScore}/3</b></td>
               </tr>
             ))}
           </tbody>
@@ -377,11 +473,15 @@ const styles = {
   input: { width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #334155", background: "#020617", color: "white", textAlign: "center", fontSize: "24px", fontWeight: "bold", letterSpacing: "3px" },
   button: { background: "#f59e0b", border: "none", borderRadius: "8px", padding: "10px 16px", fontWeight: "bold", cursor: "pointer", marginBottom: "16px" },
   sectionTitle: { color: "#fbbf24", marginTop: "24px" },
+  coreBox: { background: "#111827", border: "1px solid #374151", borderRadius: "14px", padding: "16px", marginBottom: "16px" },
+  coreChip: { display: "inline-block", background: "#020617", border: "1px solid #f59e0b", color: "#fde68a", borderRadius: "999px", padding: "8px 14px", margin: "5px", fontSize: "18px", fontWeight: "bold" },
   tableWrap: { overflowX: "auto", border: "1px solid #374151", borderRadius: "12px", marginTop: "12px" },
-  table: { width: "100%", borderCollapse: "collapse", minWidth: "1050px", background: "#111827" },
+  table: { width: "100%", borderCollapse: "collapse", minWidth: "1450px", background: "#111827" },
   th: { border: "1px solid #374151", padding: "10px", background: "#f59e0b", color: "black", textAlign: "center" },
   td: { border: "1px solid #374151", padding: "9px", textAlign: "center" },
   pred: { border: "1px solid #374151", padding: "9px", textAlign: "center", color: "#fde68a" },
   hit: { border: "1px solid #374151", padding: "9px", textAlign: "center", color: "#22c55e", fontWeight: "bold" },
   miss: { border: "1px solid #374151", padding: "9px", textAlign: "center", color: "#ef4444", fontWeight: "bold" },
+  coreHit: { border: "1px solid #374151", padding: "9px", textAlign: "center", color: "#38bdf8", fontWeight: "bold" },
+  coreMiss: { border: "1px solid #374151", padding: "9px", textAlign: "center", color: "#94a3b8", fontWeight: "bold" },
 };
